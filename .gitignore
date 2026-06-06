@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# Ghidra build output
+dist/
+*.zip
+
+# OS
+.DS_Store
