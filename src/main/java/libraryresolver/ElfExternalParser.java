@@ -8,6 +8,8 @@ import ghidra.program.model.symbol.*;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
+import ghidra.program.model.data.*;
+import ghidra.program.model.listing.Listing;
 
 import java.util.*;
 
@@ -15,6 +17,8 @@ public class ElfExternalParser {
 	
 	private final Program program;
 	private final MessageLog log;
+	private Structure verneedStruct;
+	private Structure vernauxStruct;
 	
 	public ElfExternalParser(Program program, MessageLog log) {
 		this.program = program;
@@ -51,6 +55,44 @@ public class ElfExternalParser {
 				String.format("Found %d external symbols", results.size()));
 	 
 			return results;
+	}
+	
+	private void initVersionStructs() {
+		
+		DataTypeManager dtm = program.getDataTypeManager();
+		
+		StructureDataType vn = new StructureDataType("Verneed", 0, dtm);
+		vn.add(WordDataType.dataType,	2,	"vn_version", "always 1");
+		vn.add(WordDataType.dataType,  2, "vn_cnt",     "number of Vernaux in chain");
+		vn.add(DWordDataType.dataType, 4, "vn_file",    "offset into .dynstr -> library name");
+		vn.add(DWordDataType.dataType, 4, "vn_aux",     "offset to first Vernaux");
+		vn.add(DWordDataType.dataType, 4, "vn_next",    "offset to next Verneed (0 = last)");
+		
+		StructureDataType vna = new StructureDataType("Vernaux", 0, dtm);
+		vna.add(DWordDataType.dataType, 4, "vna_hash",  "ELF hash of version string");
+		vna.add(WordDataType.dataType,  2, "vna_flags", "usually 0, or VER_FLG_WEAK");
+		vna.add(WordDataType.dataType,  2, "vna_other", "version index");
+		vna.add(DWordDataType.dataType, 4, "vna_name",  "offset into .dynstr -> version string");
+		vna.add(DWordDataType.dataType, 4, "vna_next",  "offset to next Vernaux (0 = last)");
+		
+		verneedStruct = (Structure) dtm.resolve(vn,  null);
+		vernauxStruct = (Structure) dtm.resolve(vna, null);
+	}
+	
+	
+	private void applyStruct(Address addr, DataType dt) {
+		// Debug 
+		// log.appendMsg("LibraryResolver", "applyStruct: dt=" + dt + " addr=" + addr);
+		try {
+				Listing listing = program.getListing();
+				listing.clearCodeUnits( addr, addr.add(dt.getLength() - 1), false);
+				listing.createData(addr, dt);
+		} catch (Exception e) {
+				log.appendMsg("LibraryResolver",
+						"Could not apply " + dt.getName() + " at " + addr + ": " + e.getMessage());
+		}
+		
+		
 	}
 	
 	
@@ -141,6 +183,11 @@ public class ElfExternalParser {
 	 */
 	
 	private Map<Integer, String[]> parseGnuVersionRequirements() {
+		if (verneedStruct == null || vernauxStruct == null) {
+			initVersionStructs();
+		}
+		
+		
 		Map<Integer, String[]> result = new HashMap<>();
 		
 		Memory mem = program.getMemory();
@@ -164,6 +211,9 @@ public class ElfExternalParser {
 			// The loopCount variable is intended for preventing against infinite loops
 			
 			while (offset < verneedBlock.getSize() && loopCount++ < safetyLimit) {
+				Address verneedAddr = base.add(offset);
+				applyStruct(verneedAddr, verneedStruct);
+				
 				// Elf*_Verneed: vn_version(2) vn_cnt(2) vn_file(4) vn_aux(4) vn_next(4)
 				int vn_cnt  = readU16(mem, base.add(offset + 2), littleEndian);
 				int vn_file = readU32(mem, base.add(offset + 4), littleEndian);
@@ -176,6 +226,9 @@ public class ElfExternalParser {
 				// Walk vernaux entries for this verneed
 				int auxOffset = offset + vn_aux;
 				for (int i = 0; i < vn_cnt && i < 64; i++) { // cap at 64 aux entries
+					
+					applyStruct(base.add(auxOffset), vernauxStruct);
+					
 					// Elf64_Vernaux: vna_hash (4), vna_flags (2), vna_other (2), vna_name (4), vna_next (4)
 					int vna_other = readU16(mem, base.add(auxOffset + 6), littleEndian);
 					int vna_name  = readU32(mem, base.add(auxOffset + 8), littleEndian);
