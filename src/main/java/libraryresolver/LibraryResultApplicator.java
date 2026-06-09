@@ -1,7 +1,10 @@
 package libraryresolver; // <-- change to match your existing package
 
+import java.util.Arrays;
 import java.util.List;
 
+import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainFolder;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Program;
@@ -16,6 +19,10 @@ import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.exception.CancelledException;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Arrays;
+
 
 /**
  * Writes resolved library + version attribution back into the program database.
@@ -46,7 +53,12 @@ public class LibraryResultApplicator {
      * Apply every resolved symbol. Returns the number successfully written.
      */
     public int apply(List<ExternalSymbol> symbols, TaskMonitor monitor) throws CancelledException {
-        int applied = 0;
+       
+    	// Bind library paths first - one pass per library, before per-symbol work
+    	Set<String> libraryNames = new HashSet<>(Arrays.asList(program.getExternalManager().getExternalLibraryNames()));
+    	bindLibraryPaths(program, libraryNames, monitor);
+    	
+    	int applied = 0;
         for (ExternalSymbol sym : symbols) {
             monitor.checkCancelled();
             if (applySymbol(sym)) {
@@ -114,4 +126,27 @@ public class LibraryResultApplicator {
             return false;
         }
     }
+    
+    private void bindLibraryPaths(Program program, Set<String> libraryNames, TaskMonitor monitor) {
+    	ExternalManager extMgr = program.getExternalManager();
+    	DomainFolder folder = program.getDomainFile().getParent();
+    	
+    	for (String libName : libraryNames) {
+    			DomainFile libFile = folder.getFile(libName);
+    			if (libFile == null) {
+    				Msg.warn(this, "No imported program found for " + libName + "; skipping path bind");
+    				continue;
+    			}
+    			try {
+    				extMgr.setExternalPath(libName, libFile.getPathname(), true);
+    			} catch (InvalidInputException e) {
+    				Msg.warn(this, "Failed to bind path for " + libName + ": "  + e.getMessage());
+    			}
+    	}
+    	
+    	
+    }
+    
+    
+    
 }
