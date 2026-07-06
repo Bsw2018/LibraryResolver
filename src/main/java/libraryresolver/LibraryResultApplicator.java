@@ -52,20 +52,23 @@ public class LibraryResultApplicator {
     /**
      * Apply every resolved symbol. Returns the number successfully written.
      */
-    public int apply(List<ExternalSymbol> symbols, TaskMonitor monitor) throws CancelledException {
-       
-    	// Bind library paths first - one pass per library, before per-symbol work
-    	Set<String> libraryNames = new HashSet<>(Arrays.asList(program.getExternalManager().getExternalLibraryNames()));
-    	bindLibraryPaths(program, libraryNames, monitor);
-    	
+    public int apply(List<ExternalSymbol> symbols,
+            java.util.Map<String, String> projectPaths,
+            TaskMonitor monitor) throws CancelledException {
+
+    	Set<String> libraryNames = new HashSet<>(Arrays.asList(
+    			program.getExternalManager().getExternalLibraryNames()));
+
+    	bindLibraryPaths(libraryNames, projectPaths, monitor);
+
     	int applied = 0;
-        for (ExternalSymbol sym : symbols) {
-            monitor.checkCancelled();
-            if (applySymbol(sym)) {
-                applied++;
-            }
-        }
-        return applied;
+    	for (ExternalSymbol sym : symbols) {
+    		monitor.checkCancelled();
+    		if (applySymbol(sym)) {
+    			applied++;
+    		}
+    	}
+    	return applied;
     }
 
     private boolean applySymbol(ExternalSymbol sym) {
@@ -127,26 +130,27 @@ public class LibraryResultApplicator {
         }
     }
     
-    private void bindLibraryPaths(Program program, Set<String> libraryNames, TaskMonitor monitor) {
-    	ExternalManager extMgr = program.getExternalManager();
-    	DomainFolder folder = program.getDomainFile().getParent();
-    	
+    private void bindLibraryPaths(Set<String> libraryNames,
+            java.util.Map<String, String> projectPaths,
+            TaskMonitor monitor) {
     	for (String libName : libraryNames) {
-    			DomainFile libFile = folder.getFile(libName);
-    			if (libFile == null) {
-    				Msg.warn(this, "No imported program found for " + libName + "; skipping path bind");
-    				continue;
-    			}
-    			try {
-    				extMgr.setExternalPath(libName, libFile.getPathname(), true);
-    			} catch (InvalidInputException e) {
-    				Msg.warn(this, "Failed to bind path for " + libName + ": "  + e.getMessage());
-    			}
+    		if (libName == null || libName.isEmpty() || libName.equals("<EXTERNAL>")) {
+    			continue;   // Ghidra's catch-all bucket, not a real soname
+    		}
+    		String projectPath = projectPaths.get(libName);
+    		if (projectPath == null) {
+    			Msg.warn(this, "No imported program for " + libName + "; skipping bind");
+    			continue;
+    		}
+    		try {
+    			// Bind to the PROJECT NODE (not a disk path). This is what makes
+    			// double-clicking an external function jump into the library.
+    			extMgr.setExternalPath(libName, projectPath, true);
+    			Msg.info(this, "Bound " + libName + " -> " + projectPath);
+    		} catch (InvalidInputException e) {
+    			Msg.warn(this, "Failed to bind path for " + libName + ": " + e.getMessage());
+    		}
     	}
-    	
-    	
     }
-    
-    
     
 }
