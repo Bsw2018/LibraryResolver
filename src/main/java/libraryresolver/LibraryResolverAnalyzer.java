@@ -64,13 +64,28 @@ public class LibraryResolverAnalyzer extends AbstractAnalyzer {
 		return format.contains("ELF"); // || format.contains("PE");
 	}
 
+	
+	private static final String OPTION_SEARCH_ROOT = "Library Search Root";
+	private static final String OPTION_SEARCH_ROOT_DESC = "Directory tree to search recursively for candidate shared libraries " +
+			"(e.g. the root of an extracted firmware image).";
+	private static final String DEFAULT_SEARCH_ROOT = "/usr/lib/x86_64-linux-gnu";
+	
+	private String searchRootPath = DEFAULT_SEARCH_ROOT;
+	
+	
+	
 	@Override
 	public void registerOptions(Options options, Program program) {
 
 		// If this analyzer has custom options, register them here
 
-		options.registerOption("Option name goes here", false, null,
-			"Option description goes here");
+		options.registerOption(OPTION_SEARCH_ROOT, DEFAULT_SEARCH_ROOT, null,
+				OPTION_SEARCH_ROOT_DESC);
+	}
+	
+	@Override
+	public void optionsChanged(Options options, Program program) {
+		searchRootPath = options.getString(OPTION_SEARCH_ROOT, DEFAULT_SEARCH_ROOT);
 	}
 
 	@Override
@@ -101,9 +116,15 @@ public class LibraryResolverAnalyzer extends AbstractAnalyzer {
 				}
 			}
 			
-			// For now, point at a fixed directory so we can watch it work.
-			// TODO: make this an analyzer option (the extracted image root).
-			java.io.File searchRoot = new java.io.File("/usr/lib/x86_64-linux-gnu");
+
+			java.io.File searchRoot = new java.io.File(searchRootPath);
+			
+			if (!searchRoot.isDirectory()) {
+				log.appendMsg("LibraryResolver",
+					"Search root does not exist or is not a directory: " + searchRootPath + " - library resolution skipped");
+			
+				return true;
+			}
 			
 			// Build the target arch spec ONCE, before the soname loop. Ghidra's
 			// Language gives us endianness + size but NOT the raw ELF e_machine,
@@ -205,8 +226,8 @@ public class LibraryResolverAnalyzer extends AbstractAnalyzer {
 	                ghidra.app.util.importer.AutoImporter.importByUsingBestGuess(
 	                    file, project, folderPath, this, log, monitor);
 
-	            results.save(monitor);   // REQUIRED: import alone does not persist to project
-	            results.close();         // REQUIRED: release the loaded programs
+	            results.save(project, monitor, log, monitor);   // REQUIRED: import alone does not persist to project
+	            results.release(this);         // REQUIRED: release the loaded programs
 
 	            projectPaths.put(soname, projectPath);
 	            log.appendMsg("LibraryResolver", "Imported " + soname + " -> " + projectPath);
